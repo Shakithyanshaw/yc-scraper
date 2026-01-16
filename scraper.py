@@ -5,22 +5,24 @@ import time
 import os
 
 # -------------------------------
-# CONFIG
+# CONFIGURATION
 # -------------------------------
 TARGET_COMPANIES = 500
 OUTPUT_FILE = "output/yc_startups.csv"
+BASE_URL = "https://www.ycombinator.com"
 
 
 # -------------------------------
-# HELPER FUNCTIONS
+# HELPER FUNCTION
 # -------------------------------
 def safe_text(page, selector):
     """
-    Safely extract text from a selector
+    Safely extract text from a selector.
+    Returns empty string if not found.
     """
     try:
-        element = page.query_selector(selector)
-        return element.inner_text().strip() if element else ""
+        el = page.query_selector(selector)
+        return el.inner_text().strip() if el else ""
     except:
         return ""
 
@@ -31,7 +33,7 @@ def safe_text(page, selector):
 def get_company_links(page, target_count):
     print("Collecting company links...")
 
-    page.goto("https://www.ycombinator.com/companies", timeout=60000)
+    page.goto(f"{BASE_URL}/companies", timeout=60000)
 
     company_links = set()
 
@@ -41,10 +43,10 @@ def get_company_links(page, target_count):
         for card in cards:
             href = card.get_attribute("href")
             if href and href.startswith("/companies/"):
-                full_url = "https://www.ycombinator.com" + href
+                full_url = BASE_URL + href
                 company_links.add(full_url)
 
-        # Scroll to load more companies
+        # Scroll down to load more companies
         page.mouse.wheel(0, 6000)
         time.sleep(1)
 
@@ -55,39 +57,50 @@ def get_company_links(page, target_count):
 
 
 # -------------------------------
-# STEP 2: SCRAPE COMPANY DETAILS
+# STEP 2: SCRAPE A COMPANY PAGE
 # -------------------------------
-def scrape_company(page, url):
-    page.goto(url, timeout=60000)
-    time.sleep(1)
-
-    company_data = {}
-
-    company_data["Company Name"] = safe_text(page, "h1")
-    company_data["Batch"] = safe_text(page, "span[class*='tag']")
-    company_data["Description"] = safe_text(page, "div[class*='description']")
-
-    founders = page.query_selector_all("div[class*='founder']")
-
-    founder_names = []
-    founder_linkedins = []
-
-    for founder in founders:
+def scrape_company(page, url, retries=2):
+    """
+    Scrapes a single YC company page.
+    Retries on timeout and skips broken pages.
+    """
+    for attempt in range(retries):
         try:
-            name_el = founder.query_selector("div[class*='name']")
-            linkedin_el = founder.query_selector("a[href*='linkedin.com']")
+            page.goto(url, timeout=20000, wait_until="domcontentloaded")
+            time.sleep(0.8)
 
-            if name_el:
-                founder_names.append(name_el.inner_text().strip())
-            if linkedin_el:
-                founder_linkedins.append(linkedin_el.get_attribute("href"))
-        except:
-            continue
+            company = {}
 
-    company_data["Founder Names"] = ", ".join(founder_names)
-    company_data["Founder LinkedIn URLs"] = ", ".join(founder_linkedins)
+            company["Company Name"] = safe_text(page, "h1")
+            company["Batch"] = safe_text(page, "span[class*='tag']")
+            company["Description"] = safe_text(page, "div[class*='description']")
 
-    return company_data
+            founders = page.query_selector_all("div[class*='founder']")
+
+            founder_names = []
+            founder_linkedins = []
+
+            for founder in founders:
+                try:
+                    name_el = founder.query_selector("div[class*='name']")
+                    linkedin_el = founder.query_selector("a[href*='linkedin.com']")
+
+                    if name_el:
+                        founder_names.append(name_el.inner_text().strip())
+                    if linkedin_el:
+                        founder_linkedins.append(linkedin_el.get_attribute("href"))
+                except:
+                    continue
+
+            company["Founder Names"] = ", ".join(founder_names)
+            company["Founder LinkedIn URLs"] = ", ".join(founder_linkedins)
+
+            return company
+
+        except Exception:
+            if attempt == retries - 1:
+                print(f"Skipped (timeout/unavailable): {url}")
+                return None
 
 
 # -------------------------------
@@ -104,23 +117,27 @@ def main():
         company_links = get_company_links(page, TARGET_COMPANIES)
 
         for link in tqdm(company_links, desc="Scraping companies"):
-            try:
-                data = scrape_company(page, link)
+            data = scrape_company(page, link)
+            if data:
                 results.append(data)
-            except Exception as e:
-                print(f"Failed to scrape {link}: {e}")
+
+            # Save progress every 50 companies (safety + bonus points)
+            if len(results) % 50 == 0:
+                pd.DataFrame(results).to_csv(OUTPUT_FILE, index=False)
 
         browser.close()
 
-    # Save to CSV
+    # Final save
     df = pd.DataFrame(results)
     df.to_csv(OUTPUT_FILE, index=False)
 
-    print(f"\nScraping completed. Data saved to {OUTPUT_FILE}")
+    print(f"\nScraping completed successfully.")
+    print(f"Total companies scraped: {len(df)}")
+    print(f"Data saved to: {OUTPUT_FILE}")
 
 
 # -------------------------------
-# ENTRY POINT
+# SCRIPT ENTRY POINT
 # -------------------------------
 if __name__ == "__main__":
     main()
