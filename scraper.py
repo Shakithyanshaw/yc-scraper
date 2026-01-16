@@ -60,37 +60,42 @@ def get_company_links(page, target_count):
 # STEP 2: SCRAPE A COMPANY PAGE
 # -------------------------------
 def scrape_company(page, url, retries=2):
-    """
-    Scrapes a single YC company page.
-    Retries on timeout and skips broken pages.
-    """
     for attempt in range(retries):
         try:
             page.goto(url, timeout=20000, wait_until="domcontentloaded")
-            time.sleep(0.8)
+            time.sleep(1)
 
             company = {}
 
-            company["Company Name"] = safe_text(page, "h1")
-            company["Batch"] = safe_text(page, "span[class*='tag']")
-            company["Description"] = safe_text(page, "div[class*='description']")
+            # 1. Company Name
+            company["Company Name"] = page.locator("h1").first.inner_text().strip()
 
-            founders = page.query_selector_all("div[class*='founder']")
+            # 2. Batch (usually next to company name)
+            batch_el = page.locator("span:has-text('S') , span:has-text('W')").first
+            company["Batch"] = batch_el.inner_text().strip() if batch_el.count() else ""
 
+            # 3. Short Description (first paragraph under header)
+            desc_el = page.locator("main p").first
+            company["Description"] = desc_el.inner_text().strip() if desc_el.count() else ""
+
+            # 4 & 5. Founders
             founder_names = []
             founder_linkedins = []
 
-            for founder in founders:
-                try:
-                    name_el = founder.query_selector("div[class*='name']")
-                    linkedin_el = founder.query_selector("a[href*='linkedin.com']")
+            founders_section = page.locator("section:has-text('Founders')")
 
-                    if name_el:
-                        founder_names.append(name_el.inner_text().strip())
-                    if linkedin_el:
-                        founder_linkedins.append(linkedin_el.get_attribute("href"))
-                except:
-                    continue
+            if founders_section.count():
+                founders = founders_section.locator("a")
+
+                for i in range(founders.count()):
+                    founder = founders.nth(i)
+
+                    name = founder.locator("h4").inner_text().strip()
+                    founder_names.append(name)
+
+                    linkedin = founder.get_attribute("href")
+                    if linkedin and "linkedin.com" in linkedin:
+                        founder_linkedins.append(linkedin)
 
             company["Founder Names"] = ", ".join(founder_names)
             company["Founder LinkedIn URLs"] = ", ".join(founder_linkedins)
@@ -99,8 +104,9 @@ def scrape_company(page, url, retries=2):
 
         except Exception:
             if attempt == retries - 1:
-                print(f"Skipped (timeout/unavailable): {url}")
+                print(f"Skipped: {url}")
                 return None
+
 
 
 # -------------------------------
