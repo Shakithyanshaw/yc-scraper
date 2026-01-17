@@ -48,44 +48,42 @@ def get_company_links(page, target_count):
     return list(company_links)[:target_count]
 
 # -------------------------------
-# STEP 2: SCRAPE A COMPANY PAGE
+# STEP 2: SCRAPE COMPANY PAGE
 # -------------------------------
 def scrape_company(page, url, retries=1):
-    for attempt in range(retries):
+    for _ in range(retries):
         try:
             page.goto(url, wait_until="commit")
 
             company = {}
 
-            # Company Name
+            # 1️⃣ Company Name
             company["Company Name"] = page.locator("h1").inner_text().strip()
 
-            # Batch
+            # 2️⃣ Batch
             batch_el = page.locator("span:has-text('S'), span:has-text('W')")
             company["Batch"] = batch_el.first.inner_text().strip() if batch_el.count() else ""
 
-            # Description
-            desc_el = page.locator("main p")
-            company["Description"] = desc_el.first.inner_text().strip() if desc_el.count() else ""
+            # 3️⃣ Short Description (FIXED)
+            desc_el = page.locator("[data-testid='company-description']")
+            company["Description"] = desc_el.inner_text().strip() if desc_el.count() else ""
 
-            # Founders
-            founder_names = []
-            founder_linkedins = []
+            # 4️⃣ & 5️⃣ Founders (FIXED)
+            founder_names = set()
+            founder_linkedins = set()
 
-            founders_section = page.locator("section:has-text('Founders')")
-            if founders_section.count():
-                founders = founders_section.locator("a")
+            linkedin_links = page.locator("a[href*='linkedin.com']")
 
-                for i in range(founders.count()):
-                    founder = founders.nth(i)
+            for i in range(linkedin_links.count()):
+                link = linkedin_links.nth(i)
+                href = link.get_attribute("href")
 
-                    name_el = founder.locator("h4")
-                    if name_el.count():
-                        founder_names.append(name_el.inner_text().strip())
+                name_el = link.locator("xpath=ancestor::div[1]//h4")
+                if name_el.count():
+                    founder_names.add(name_el.inner_text().strip())
 
-                    link = founder.get_attribute("href")
-                    if link and "linkedin.com" in link:
-                        founder_linkedins.append(link)
+                if href:
+                    founder_linkedins.add(href)
 
             company["Founder Names"] = ", ".join(founder_names)
             company["Founder LinkedIn URLs"] = ", ".join(founder_linkedins)
@@ -93,9 +91,8 @@ def scrape_company(page, url, retries=1):
             return company
 
         except Exception:
-            if attempt == retries - 1:
-                print(f"Skipped: {url}")
-                return None
+            print(f"Skipped: {url}")
+            return None
 
 # -------------------------------
 # MAIN FUNCTION
@@ -126,7 +123,7 @@ def main():
 
     print("\n✅ Scraping completed successfully.")
     print(f"Total companies scraped: {len(results)}")
-    print(f"Data saved to: {OUTPUT_FILE}")
+    print(f"Saved to: {OUTPUT_FILE}")
 
 # -------------------------------
 # ENTRY POINT
